@@ -1,0 +1,938 @@
+import 'dart:math';
+import 'package:flutter/material.dart';
+
+void main() {
+  runApp(PlantPalApp());
+}
+
+class PlantPalApp extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'PlantPal 🌿',
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData(
+        useMaterial3: true,
+        brightness: Brightness.light,
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.green),
+        scaffoldBackgroundColor: const Color(0xFFF1FBF4),
+        fontFamily: 'Roboto',
+      ),
+      home: PlantHomePage(),
+    );
+  }
+}
+
+/* ---------------------------
+   Model
+----------------------------*/
+class Plant {
+  String name;
+  int daysBetweenWatering; // 1 - 14
+  DateTime lastWatered;
+  String emoji;
+
+  Plant({
+    required this.name,
+    required this.daysBetweenWatering,
+    required this.lastWatered,
+    required this.emoji,
+  });
+
+  bool get needsWater =>
+      DateTime.now().difference(lastWatered).inDays >= daysBetweenWatering;
+}
+
+/* ---------------------------
+   Home (Tabs + Shared State)
+----------------------------*/
+class PlantHomePage extends StatefulWidget {
+  @override
+  State<PlantHomePage> createState() => _PlantHomePageState();
+}
+
+class _PlantHomePageState extends State<PlantHomePage>
+    with TickerProviderStateMixin {
+  int _selectedIndex = 0;
+  final List<Plant> plants = [];
+
+  void _addPlant(Plant p) {
+    setState(() => plants.add(p));
+  }
+
+  void _waterPlant(Plant p) {
+    setState(() => p.lastWatered = DateTime.now());
+  }
+
+  void _deletePlant(Plant p) {
+    setState(() => plants.remove(p));
+  }
+
+  // Basic derived stats
+  int get totalPlants => plants.length;
+  int get needsWaterCount => plants.where((p) => p.needsWater).length;
+  double get averageInterval =>
+      plants.isEmpty ? 0 : plants.map((p) => p.daysBetweenWatering).reduce((a, b) => a + b) / plants.length;
+  DateTime? get latestWatered {
+    if (plants.isEmpty) return null;
+    plants.sort((a, b) => b.lastWatered.compareTo(a.lastWatered));
+    return plants.first.lastWatered;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: IndexedStack(
+        index: _selectedIndex,
+        children: [
+          MyPlantsTab(
+            plants: plants,
+            onAdd: () async {
+              final p = await showDialog<Plant>(
+                context: context,
+                builder: (c) => AddPlantDialog(),
+              );
+              if (p != null) _addPlant(p);
+            },
+            onWater: _waterPlant,
+            onDelete: _deletePlant,
+          ),
+          StatsTab(
+            plants: plants,
+            totalPlants: totalPlants,
+            needsWaterCount: needsWaterCount,
+            averageInterval: averageInterval,
+            latestWatered: latestWatered,
+          ),
+        ],
+      ),
+      bottomNavigationBar: BottomNavigationBar(
+        currentIndex: _selectedIndex,
+        onTap: (i) => setState(() => _selectedIndex = i),
+        backgroundColor: Colors.white,
+        selectedItemColor: Colors.green.shade800,
+        unselectedItemColor: Colors.grey[600],
+        items: const [
+          BottomNavigationBarItem(icon: Icon(Icons.local_florist), label: 'My Plants'),
+          BottomNavigationBarItem(icon: Icon(Icons.bar_chart), label: 'Stats'),
+        ],
+      ),
+    );
+  }
+}
+
+/* ---------------------------
+   My Plants Tab (Grid)
+----------------------------*/
+class MyPlantsTab extends StatefulWidget {
+  final List<Plant> plants;
+  final VoidCallback onAdd;
+  final void Function(Plant) onWater;
+  final void Function(Plant) onDelete;
+
+  const MyPlantsTab({
+    required this.plants,
+    required this.onAdd,
+    required this.onWater,
+    required this.onDelete,
+  });
+
+  @override
+  State<MyPlantsTab> createState() => _MyPlantsTabState();
+}
+
+class _MyPlantsTabState extends State<MyPlantsTab> with SingleTickerProviderStateMixin {
+  // animation controller for subtle entrance
+  late final AnimationController _entranceController;
+
+  @override
+  void initState() {
+    super.initState();
+    _entranceController = AnimationController(vsync: this, duration: const Duration(milliseconds: 600));
+    _entranceController.forward();
+  }
+
+  @override
+  void dispose() {
+    _entranceController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final plants = widget.plants;
+    return SafeArea(
+      child: Column(
+        children: [
+          // Header area
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'My Plants',
+                    style: TextStyle(fontSize: 28, fontWeight: FontWeight.w700, color: Colors.green.shade900),
+                  ),
+                ),
+                ElevatedButton.icon(
+                  onPressed: widget.onAdd,
+                  icon: const Icon(Icons.add),
+                  label: const Text('Add Plant'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.green.shade700,
+                    elevation: 8,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // Quick summary row
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+            child: Row(
+              children: [
+                _StatChip(
+                  emoji: '🌿',
+                  label: '${plants.length}',
+                  subtitle: 'Total',
+                  color: Colors.green.shade700,
+                ),
+                const SizedBox(width: 10),
+                _StatChip(
+                  emoji: '💧',
+                  label: '${plants.where((p) => p.needsWater).length}',
+                  subtitle: 'Needs Water',
+                  color: Colors.blue.shade700,
+                ),
+                const SizedBox(width: 10),
+                _StatChip(
+                  emoji: '⏱️',
+                  label: plants.isEmpty ? '-' : plants.map((p) => p.daysBetweenWatering).reduce((a,b)=>a+b) ~/ max(1, plants.length),
+                  subtitle: 'Avg Interval',
+                  color: Colors.teal.shade700,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+          Expanded(
+            child: plants.isEmpty
+                ? Center(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 32.0),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text('No plants yet', style: TextStyle(fontSize: 20, color: Colors.grey[700], fontWeight: FontWeight.w600)),
+                          const SizedBox(height: 8),
+                          Text('Tap "Add Plant" to start growing your collection 🌱',
+                              textAlign: TextAlign.center, style: TextStyle(color: Colors.grey[600])),
+                          const SizedBox(height: 20),
+                          SizedBox(
+                            width: 220,
+                            child: ElevatedButton.icon(
+                              onPressed: widget.onAdd,
+                              icon: const Icon(Icons.add),
+                              label: const Text('Add your first plant'),
+                              style: ElevatedButton.styleFrom(backgroundColor: Colors.green.shade600),
+                            ),
+                          )
+                        ],
+                      ),
+                    ),
+                  )
+                : GridView.builder(
+                    padding: const EdgeInsets.all(16),
+                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 2,
+                      childAspectRatio: 0.95,
+                      crossAxisSpacing: 14,
+                      mainAxisSpacing: 14,
+                    ),
+                    itemCount: plants.length,
+                    itemBuilder: (context, i) {
+                      final p = plants[i];
+                      final delay = (i * 80);
+                      return FadeScaleTile(
+                        delayMs: delay,
+                        child: PlantCard(
+                          plant: p,
+                          onWater: () => widget.onWater(p),
+                          onDelete: () => widget.onDelete(p),
+                        ),
+                      );
+                    },
+                  ),
+          )
+        ],
+      ),
+    );
+  }
+}
+
+/* ---------------------------
+   Plant Card (hover/press overlay)
+----------------------------*/
+class PlantCard extends StatefulWidget {
+  final Plant plant;
+  final VoidCallback onWater;
+  final VoidCallback onDelete;
+
+  const PlantCard({required this.plant, required this.onWater, required this.onDelete});
+
+  @override
+  State<PlantCard> createState() => _PlantCardState();
+}
+class _PlantCardState extends State<PlantCard> with SingleTickerProviderStateMixin {
+  bool _hover = false;
+  bool _overlayVisible = false;
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      duration: const Duration(milliseconds: 250),
+      vsync: this,
+    );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _toggleOverlay() {
+    setState(() {
+      _overlayVisible = !_overlayVisible;
+      if (_overlayVisible) {
+        _controller.forward();
+      } else {
+        _controller.reverse();
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = widget.plant;
+    final needs = p.needsWater;
+    final baseColor = needs ? Colors.red.shade50 : Colors.green.shade50;
+    final accent = needs ? Colors.red.shade700 : Colors.green.shade800;
+
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: GestureDetector(
+        onTap: _toggleOverlay,
+        onLongPress: _toggleOverlay,
+        child: AnimatedScale(
+          scale: _hover || _overlayVisible ? 1.04 : 1.0,
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOutBack,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 300),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: baseColor,
+              borderRadius: BorderRadius.circular(18),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.green.shade200.withOpacity(0.5),
+                  blurRadius: 16,
+                  offset: const Offset(0, 6),
+                ),
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.04),
+                  blurRadius: 6,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: Stack(
+              children: [
+                // 🌿 Main card content
+                Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    CircleAvatar(
+                      radius: 32,
+                      backgroundColor: Colors.white,
+                      child: Text(p.emoji, style: const TextStyle(fontSize: 32)),
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      p.name,
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 16,
+                        color: accent,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      p.needsWater ? '💧 Needs water' : '🪴 Healthy',
+                      style: TextStyle(
+                        color: p.needsWater
+                            ? Colors.red.shade700
+                            : Colors.green.shade700,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        _TinyIconButton(
+                            icon: Icons.water_drop,
+                            label: 'Water',
+                            onTap: widget.onWater),
+                        const SizedBox(width: 8),
+                        _TinyIconButton(
+                            icon: Icons.delete,
+                            label: 'Delete',
+                            onTap: widget.onDelete),
+                      ],
+                    ),
+                  ],
+                ),
+
+                // 💧 Overlay info
+                Positioned.fill(
+                  child: FadeTransition(
+                    opacity: _controller,
+                    child: IgnorePointer(
+                      ignoring: !_overlayVisible,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.95),
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        padding: const EdgeInsets.all(12),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text(
+                              p.name,
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.bold, fontSize: 16),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              'Last watered: ${p.lastWatered.toLocal().toString().split(' ')[0]}',
+                              style: const TextStyle(fontSize: 13),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Water every ${p.daysBetweenWatering} days',
+                              style: const TextStyle(fontSize: 13),
+                            ),
+                            const SizedBox(height: 10),
+                            LinearProgressIndicator(
+                              value: min(
+                                1.0,
+                                DateTime.now()
+                                        .difference(p.lastWatered)
+                                        .inDays /
+                                    p.daysBetweenWatering,
+                              ),
+                              backgroundColor: Colors.grey[200],
+                              valueColor: AlwaysStoppedAnimation<Color>(accent),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/* ---------------------------
+   Small helper widgets
+----------------------------*/
+class _TinyIconButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  const _TinyIconButton({required this.icon, required this.label, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.white,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      elevation: 4,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          child: Row(
+            children: [
+              Icon(icon, size: 16, color: Colors.blue.shade700),
+              const SizedBox(width: 6),
+              Text(label, style: const TextStyle(fontSize: 12)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _StatChip extends StatelessWidget {
+  final String emoji;
+  final dynamic label;
+  final String subtitle;
+  final Color color;
+
+  const _StatChip({required this.emoji, required this.label, required this.subtitle, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(14),
+          boxShadow: [
+            BoxShadow(color: color.withOpacity(0.12), blurRadius: 12, offset: const Offset(0, 8)),
+          ],
+        ),
+        child: Row(
+          children: [
+            CircleAvatar(backgroundColor: color.withOpacity(0.12), child: Text(emoji)),
+            const SizedBox(width: 12),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('$label', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16, color: Colors.grey[900])),
+                const SizedBox(height: 4),
+                Text(subtitle, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+              ],
+            )
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/* ---------------------------
+   Add Plant Dialog
+----------------------------*/
+class AddPlantDialog extends StatefulWidget {
+  @override
+  State<AddPlantDialog> createState() => _AddPlantDialogState();
+}
+
+class _AddPlantDialogState extends State<AddPlantDialog> {
+  final TextEditingController _nameController = TextEditingController();
+  int _interval = 3;
+  final List<String> _emojis = ['🌵', '🌼', '🌴', '🌻', '🍀', '🌱'];
+  String _selectedEmoji = '🌵';
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Add Plant'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: _nameController,
+              decoration: const InputDecoration(labelText: 'Plant name'),
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 10,
+              children: _emojis.map((e) {
+                final selected = e == _selectedEmoji;
+                return ChoiceChip(
+                  label: Text(e, style: const TextStyle(fontSize: 20)),
+                  selected: selected,
+                  onSelected: (_) => setState(() => _selectedEmoji = e),
+                  elevation: selected ? 6 : 2,
+                  selectedColor: Colors.green.shade100,
+                );
+              }).toList(),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                const Text('Water every'),
+                Expanded(
+                  child: Slider(
+                    min: 1,
+                    max: 14,
+                    divisions: 13,
+                    value: _interval.toDouble(),
+                    label: '$_interval days',
+                    onChanged: (v) => setState(() => _interval = v.round()),
+                  ),
+                ),
+                Text('$_interval d'),
+              ],
+            )
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        ElevatedButton(
+          onPressed: () {
+            final name = _nameController.text.trim();
+            if (name.isEmpty) return;
+            final p = Plant(
+              name: name,
+              daysBetweenWatering: _interval,
+              lastWatered: DateTime.now().subtract(Duration(days: Random().nextInt(max(1, _interval)))),
+              emoji: _selectedEmoji,
+            );
+            Navigator.pop(context, p);
+          },
+          style: ElevatedButton.styleFrom(backgroundColor: Colors.green.shade700),
+          child: const Text('Add'),
+        )
+      ],
+    );
+  }
+}
+
+/* ---------------------------
+   Stats Tab (includes animated bar chart)
+----------------------------*/
+class StatsTab extends StatelessWidget {
+  final List<Plant> plants;
+  final int totalPlants;
+  final int needsWaterCount;
+  final double averageInterval;
+  final DateTime? latestWatered;
+
+  const StatsTab({
+    required this.plants,
+    required this.totalPlants,
+    required this.needsWaterCount,
+    required this.averageInterval,
+    required this.latestWatered,
+  });
+
+  // produce counts for intervals 1..14
+  List<int> _intervalCounts() {
+    final counts = List<int>.filled(14, 0);
+    for (var p in plants) {
+      final idx = p.daysBetweenWatering.clamp(1, 14) - 1;
+      counts[idx] += 1;
+    }
+    return counts;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final counts = _intervalCounts();
+    final maxCount = counts.isEmpty ? 1 : counts.reduce(max);
+
+    return SafeArea(
+      child: Column(
+        children: [
+          // Header
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 10),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Dashboard',
+                    style: TextStyle(
+                      fontSize: 28,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.green.shade900,
+                    ),
+                  ),
+                ),
+                Icon(Icons.show_chart, color: Colors.green.shade700),
+              ],
+            ),
+          ),
+
+          // Stat cards
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16.0),
+            child: Row(
+              children: [
+                Expanded(
+                  child: _LargeStatCard(
+                    title: 'Total',
+                    value: '$totalPlants',
+                    emoji: '🌿',
+                    color: Colors.green.shade700,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _LargeStatCard(
+                    title: 'Needs Water',
+                    value: '$needsWaterCount',
+                    emoji: '💧',
+                    color: Colors.blue.shade700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16.0),
+            child: Row(
+              children: [
+                Expanded(
+                  child: _LargeStatCard(
+                    title: 'Avg Interval',
+                    value: totalPlants == 0
+                        ? '-'
+                        : '${averageInterval.toStringAsFixed(1)} d',
+                    emoji: '⏱️',
+                    color: Colors.teal.shade700,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _LargeStatCard(
+                    title: 'Last Watered',
+                    value: latestWatered == null
+                        ? '-'
+                        : latestWatered!.toLocal().toString().split(' ')[0],
+                    emoji: '🗓️',
+                    color: Colors.orange.shade700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 18),
+
+          // Bar chart header
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16.0),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'Plants per watering interval (days)',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.grey[800],
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+
+          // ✅ Fixed scrollable bar chart container
+          Expanded(
+            child: Padding(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 12.0, vertical: 6),
+              child: Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(14),
+                  boxShadow: [
+                    BoxShadow(
+                      color:
+                          Colors.green.shade200.withOpacity(0.3),
+                      blurRadius: 18,
+                      offset: const Offset(0, 8),
+                    ),
+                  ],
+                ),
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    return SingleChildScrollView(
+                      scrollDirection: Axis.vertical, // 👈 allows vertical scroll if needed
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                        child: Column(
+                          children: [
+                            // Horizontal scroll for bars
+                            SingleChildScrollView(
+                              scrollDirection: Axis.horizontal,
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.end,
+                                children: List.generate(14, (i) {
+                                  final count = counts[i];
+                                  final label = '${i + 1}d';
+                                  final heightFactor =
+                                      maxCount == 0 ? 0.0 : (count / maxCount);
+                                  return Padding(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                                    child: _AnimatedBar(
+                                      label: label,
+                                      count: count,
+                                      heightFactor: heightFactor,
+                                      color: Colors.green.shade600,
+                                    ),
+                                  );
+                                }),
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            // Legend row
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                const Text(
+                                  'Interval (days)',
+                                  style: TextStyle(color: Colors.grey),
+                                ),
+                                Text(
+                                  'Max: $maxCount',
+                                  style: const TextStyle(color: Colors.grey),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/* ---------------------------
+   Animated vertical bar widget
+----------------------------*/
+class _AnimatedBar extends StatelessWidget {
+  final String label;
+  final int count;
+  final double heightFactor; // 0..1
+  final Color color;
+  const _AnimatedBar({required this.label, required this.count, required this.heightFactor, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    final barHeight = 160.0;
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.end,
+      children: [
+        TweenAnimationBuilder<double>(
+          tween: Tween<double>(begin: 0, end: heightFactor),
+          duration: const Duration(milliseconds: 700),
+          curve: Curves.easeOutBack,
+          builder: (context, val, child) {
+            return Container(
+              width: 28,
+              height: barHeight * val.clamp(0.0, 1.0),
+              decoration: BoxDecoration(
+                color: color,
+                borderRadius: BorderRadius.circular(8),
+                boxShadow: [BoxShadow(color: color.withOpacity(0.3), blurRadius: 8, offset: const Offset(0, 6))],
+              ),
+            );
+          },
+        ),
+        const SizedBox(height: 8),
+        Text('$count', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 6),
+        Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+      ],
+    );
+  }
+}
+
+/* ---------------------------
+   Large stat card for Dashboard
+----------------------------*/
+class _LargeStatCard extends StatelessWidget {
+  final String title;
+  final String value;
+  final String emoji;
+  final Color color;
+
+  const _LargeStatCard({required this.title, required this.value, required this.emoji, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 92,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14), boxShadow: [BoxShadow(color: color.withOpacity(0.14), blurRadius: 18, offset: const Offset(0, 8))]),
+      child: Row(
+        children: [
+          CircleAvatar(radius: 28, backgroundColor: color.withOpacity(0.12), child: Text(emoji, style: const TextStyle(fontSize: 22))),
+          const SizedBox(width: 12),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(value, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+              const SizedBox(height: 6),
+              Text(title, style: const TextStyle(color: Colors.grey)),
+            ],
+          )
+        ],
+      ),
+    );
+  }
+}
+
+/* ---------------------------
+   FadeScaleTile - small entrance animation
+----------------------------*/
+class FadeScaleTile extends StatefulWidget {
+  final Widget child;
+  final int delayMs;
+  const FadeScaleTile({required this.child, required this.delayMs});
+
+  @override
+  State<FadeScaleTile> createState() => _FadeScaleTileState();
+}
+
+class _FadeScaleTileState extends State<FadeScaleTile> with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+  late final Animation<double> _anim;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(duration: const Duration(milliseconds: 500), vsync: this);
+    _anim = CurvedAnimation(parent: _controller, curve: Curves.easeOut);
+    Future.delayed(Duration(milliseconds: widget.delayMs), () {
+      if (mounted) _controller.forward();
+    });
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: _anim,
+      child: ScaleTransition(scale: _anim, child: widget.child),
+    );
+  }
+}
